@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'three/addons': require.resolve('three/addons'),
-      three: path.resolve(__dirname, './src/three.module.js'),
+      three: path.resolve(__dirname, './src/three/index.js'),
     },
   },
 })

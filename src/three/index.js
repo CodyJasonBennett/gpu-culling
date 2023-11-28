@@ -26,6 +26,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
     material = node.material.clone()
     material.vertexShader = node.material.computeShader
     material.fragmentShader = 'out lowp vec4 c;void main(){c=vec4(0);}'
+    material.uniforms = node.material.uniforms
     _compiled.set(node.material, material)
   }
   node.material = material
@@ -79,16 +80,16 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   node.material = oldMaterial
 
   // Debug CPU readback
-  for (const output of outputs) {
-    const attribute = node.geometry.attributes[output]
-    const { buffer } = this.attributes.get(attribute)
+  // for (const output of outputs) {
+  //   const attribute = node.geometry.attributes[output]
+  //   const { buffer } = this.attributes.get(attribute)
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
-    gl.bindBuffer(gl.ARRAY_BUFFER, null)
+  //   gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+  //   gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
+  //   gl.bindBuffer(gl.ARRAY_BUFFER, null)
 
-    console.log(output, Array.from(attribute.array))
-  }
+  //   console.log(output, Array.from(attribute.array))
+  // }
 }
 
 THREE.ShaderMaterial.prototype.computeShader = ''

@@ -1,12 +1,17 @@
 import * as THREE from 'three'
+import { OrbitControls } from 'three/addons'
 
 const renderer = new THREE.WebGLRenderer()
 renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight)
-camera.position.z = -5
-camera.updateWorldMatrix()
+camera.position.z = 5
+
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.enableDamping = true
+
+const scene = new THREE.Scene()
 
 const geometry = new THREE.BufferGeometry()
 geometry.setDrawRange(0, 3)
@@ -14,11 +19,11 @@ geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
 geometry.setAttribute('visibility', new THREE.BufferAttribute(new Int32Array(3), 1))
 geometry.attributes.visibility.gpuType = THREE.IntType
 
+const projectionViewMatrix = new THREE.Matrix4()
+
 const material = new THREE.RawShaderMaterial({
   uniforms: {
-    projectionViewMatrix: new THREE.Uniform(
-      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
-    ),
+    projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
   },
   computeShader: /* glsl */ `//#version 300 es
     uniform mat4 projectionViewMatrix;
@@ -65,12 +70,36 @@ const material = new THREE.RawShaderMaterial({
     out vec4 color;
 
     void main() {
-      color = vec4(vUv, 0, 1);
+      color = vec4(vUv, 0, 0.5);
     }
   `,
+  transparent: true,
   glslVersion: THREE.GLSL3,
 })
 const mesh = new THREE.Mesh(geometry, material)
+scene.add(mesh)
 
-renderer.compute(mesh)
-renderer.render(mesh, camera)
+scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshNormalMaterial()))
+
+const onResize = () => {
+  renderer.setSize(window.innerWidth, window.innerHeight)
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+}
+onResize()
+window.addEventListener('resize', onResize)
+
+const frustum = new THREE.Frustum()
+
+renderer.setAnimationLoop(() => {
+  controls.update()
+
+  camera.updateWorldMatrix()
+  projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+
+  frustum.setFromProjectionMatrix(projectionViewMatrix)
+  console.log(frustum.intersectsObject(scene.children[1]))
+
+  renderer.compute(mesh)
+  renderer.render(scene, camera)
+})

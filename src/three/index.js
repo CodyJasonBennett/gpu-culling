@@ -72,6 +72,18 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null)
   gl.disable(gl.RASTERIZER_DISCARD)
   node.material = oldMaterial
+
+  // Debug CPU readback
+  for (const output of outputs) {
+    const attribute = node.geometry.attributes[output]
+    const { buffer } = this.attributes.get(attribute)
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+    gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
+    gl.bindBuffer(gl.ARRAY_BUFFER, null)
+
+    console.log(output, Array.from(attribute.array))
+  }
 }
 
 THREE.ShaderMaterial.prototype.computeShader = ''

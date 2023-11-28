@@ -61,15 +61,11 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   gl.transformFeedbackVaryings(program, outputs, gl.SEPARATE_ATTRIBS)
   gl.linkProgram(program)
 
-  // materialProperties.uniformsList = null
-  // material.uniformsNeedUpdate = true
-  // material.needsUpdate = true
-
-  gl.uniformMatrix4fv(
-    gl.getUniformLocation(program, 'projectionViewMatrix'),
-    false,
-    material.uniforms.projectionViewMatrix.value.elements,
-  )
+  // Force reset uniforms after relink
+  for (const uniform of materialProperties.uniformsList) {
+    uniform.addr = gl.getUniformLocation(program, uniform.id)
+    uniform.cache = []
+  }
 
   const error = gl.getProgramInfoLog(program)
   if (error) throw new Error(error)

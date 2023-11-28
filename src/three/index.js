@@ -3,8 +3,6 @@ import * as THREE from './three.module.js'
 
 const VARYING_REGEX = /[^\w](?:varying|out)\s+\w+\s+(\w+)\s*;/g
 
-let _id = -1
-
 /** @type {WebGLTransformFeedback | null} */
 let _transformFeedback = null
 
@@ -28,7 +26,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
     material = node.material.clone()
     material.vertexShader = node.material.computeShader
     material.fragmentShader = 'out lowp vec4 c;void main(){c=vec4(0);}'
-    node.material.name = `compute${_id++}`
+    _compiled.set(node.material, material)
   }
   node.material = material
 
@@ -36,7 +34,8 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   // NOTE: compile doesn't populate this.attributes
   // https://github.com/mrdoob/three.js/pull/26777
   this.render(node, _camera)
-  const compiled = this.programs.programs.find((program) => program.name === node.material.name)
+  const materialProperties = this.properties.get(material)
+  const compiled = materialProperties.currentProgram
   const program = compiled.program
 
   // TODO: better cleanup to prevent state leak
@@ -61,6 +60,16 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   }
   gl.transformFeedbackVaryings(program, outputs, gl.SEPARATE_ATTRIBS)
   gl.linkProgram(program)
+
+  // materialProperties.uniformsList = null
+  // material.uniformsNeedUpdate = true
+  // material.needsUpdate = true
+
+  gl.uniformMatrix4fv(
+    gl.getUniformLocation(program, 'projectionViewMatrix'),
+    false,
+    material.uniforms.projectionViewMatrix.value.elements,
+  )
 
   const error = gl.getProgramInfoLog(program)
   if (error) throw new Error(error)

@@ -5,7 +5,7 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight)
-camera.position.z = 5
+camera.position.z = -5
 camera.updateWorldMatrix()
 
 const geometry = new THREE.BufferGeometry()
@@ -17,12 +17,11 @@ geometry.attributes.visibility.gpuType = THREE.IntType
 const material = new THREE.RawShaderMaterial({
   uniforms: {
     projectionViewMatrix: new THREE.Uniform(
-      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorld),
+      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
     ),
   },
   computeShader: /* glsl */ `//#version 300 es
-    // uniform mat4 projectionViewMatrix;
-    const mat4 projectionViewMatrix = mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, 0, 0, -5, -5);
+    uniform mat4 projectionViewMatrix;
 
     flat out int visibility;
 

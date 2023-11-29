@@ -43,33 +43,38 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   gl.bindVertexArray(null)
   gl.bindBuffer(gl.ARRAY_BUFFER, null)
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null)
+  gl.bindBuffer(gl.UNIFORM_BUFFER, null)
 
   _transformFeedback ??= gl.createTransformFeedback()
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, _transformFeedback)
 
-  // Get compiled source with resolved shader chunks
-  const vertexShader = gl.getShaderSource(compiled.vertexShader)
+  if (!compiled.outputs) {
+    compiled.outputs = []
 
-  // Feedback shader outputs from source
-  // TODO: interleave attributes for limits
-  const outputs = []
-  for (const [, output] of vertexShader.matchAll(VARYING_REGEX)) {
-    const attribute = node.geometry.attributes[output]
-    const { buffer } = this.attributes.get(attribute)
-    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, outputs.length, buffer)
-    outputs.push(output)
+    // Get compiled source with resolved shader chunks
+    const vertexShader = gl.getShaderSource(compiled.vertexShader)
+
+    // Feedback shader outputs from source
+    // TODO: interleave attributes for limits
+    for (const [, output] of vertexShader.matchAll(VARYING_REGEX)) {
+      const attribute = node.geometry.attributes[output]
+      const { buffer } = this.attributes.get(attribute)
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, compiled.outputs.length, buffer)
+      compiled.outputs.push(output)
+    }
+
+    gl.transformFeedbackVaryings(program, compiled.outputs, gl.SEPARATE_ATTRIBS)
+    gl.linkProgram(program)
+
+    const error = gl.getProgramInfoLog(program)
+    if (error) throw new Error(error)
+
+    // Force reset uniforms after relink
+    for (const uniform of materialProperties.uniformsList) {
+      uniform.addr = gl.getUniformLocation(program, uniform.id)
+      uniform.cache = []
+    }
   }
-  gl.transformFeedbackVaryings(program, outputs, gl.SEPARATE_ATTRIBS)
-  gl.linkProgram(program)
-
-  // Force reset uniforms after relink
-  for (const uniform of materialProperties.uniformsList) {
-    uniform.addr = gl.getUniformLocation(program, uniform.id)
-    uniform.cache = []
-  }
-
-  const error = gl.getProgramInfoLog(program)
-  if (error) throw new Error(error)
 
   gl.beginTransformFeedback(gl.TRIANGLES)
   this.render(node, _camera)
@@ -80,7 +85,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   node.material = oldMaterial
 
   // Debug CPU readback
-  // for (const output of outputs) {
+  // for (const output of compiled.outputs) {
   //   const attribute = node.geometry.attributes[output]
   //   const { buffer } = this.attributes.get(attribute)
 

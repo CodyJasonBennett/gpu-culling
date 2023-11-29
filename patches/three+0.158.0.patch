@@ -1,11 +1,12 @@
 diff --git a/node_modules/three/build/three.module.js b/node_modules/three/build/three.module.js
-index 6a6e12a..1f2575e 100644
+index 6a6e12a..c359d3b 100644
 --- a/node_modules/three/build/three.module.js
 +++ b/node_modules/three/build/three.module.js
-@@ -28512,6 +28512,7 @@ class WebGLRenderer {
+@@ -28512,6 +28512,8 @@ class WebGLRenderer {
  			_this.capabilities = capabilities;
  			_this.extensions = extensions;
  			_this.properties = properties;
++			// https://github.com/mrdoob/three.js/pull/26777
 +			_this.attributes = attributes;
  			_this.renderLists = renderLists;
  			_this.shadowMap = shadowMap;

@@ -128,7 +128,7 @@ const material = new THREE.RawShaderMaterial({
 
     flat out int visibility;
 
-    const float radius = 0.5;
+    const float radius = 1.0;
     const vec4 position = vec4(0, 0, 0, 1);
 
     void main() {
@@ -187,16 +187,11 @@ const onResize = () => {
 onResize()
 window.addEventListener('resize', onResize)
 
-const frustum = new THREE.Frustum()
-
 renderer.setAnimationLoop(() => {
   controls.update()
 
   camera.updateWorldMatrix()
-  projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
-
-  frustum.setFromProjectionMatrix(projectionViewMatrix)
-  console.log(frustum.intersectsObject(scene.children[1]))
+  projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).transpose()
 
   renderer.compute(mesh)
   renderer.render(scene, camera)

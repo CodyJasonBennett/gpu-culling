@@ -93,7 +93,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
     gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
     gl.bindBuffer(gl.ARRAY_BUFFER, null)
 
-    console.log(output, Array.from(attribute.array)[0])
+    console.log('cube culled', Array.from(attribute.array)[0] === 2)
   }
 }
 
@@ -116,9 +116,8 @@ const scene = new THREE.Scene()
 const geometry = new THREE.BufferGeometry()
 geometry.setDrawRange(0, 3)
 geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
-// geometry.setAttribute('visibility', new THREE.BufferAttribute(new Int32Array(3), 1))
-// geometry.attributes.visibility.gpuType = THREE.IntType
-geometry.setAttribute('console', new THREE.BufferAttribute(new Float32Array(3), 1))
+geometry.setAttribute('visibility', new THREE.BufferAttribute(new Int32Array(3), 1))
+geometry.attributes.visibility.gpuType = THREE.IntType
 
 const projectionViewMatrix = new THREE.Matrix4()
 
@@ -135,7 +134,7 @@ const material = new THREE.RawShaderMaterial({
     uniform sampler2D[6] mipmaps;
     uniform float radius;
 
-    out float console;
+    flat out int visibility;
 
     // const float radius = 0.87;
     const vec4 position = vec4(0, 0, 0, 1);
@@ -155,7 +154,7 @@ const material = new THREE.RawShaderMaterial({
       bool visible = true;
 
       // Frustum cull
-      if (false) {
+      if (visible) {
         // http://cs.otago.ac.nz/postgrads/alexis/planeExtraction.pdf
         vec4 planes[] = vec4[](
           projectionViewMatrix[3] - projectionViewMatrix[0], // left   (-w < +x)
@@ -175,8 +174,6 @@ const material = new THREE.RawShaderMaterial({
         }
       }
 
-      console = -1.0;
-
       // Occlusion cull
       if (visible) {
         // Calculate NDC from projected position
@@ -188,7 +185,6 @@ const material = new THREE.RawShaderMaterial({
 
         // Calculate Hi-Z mip
         int mip = clamp(int(ceil(log2(radius * resolution))), 0, 5);
-        mip = 0; // TODO: safer clamp
 
         // Calculate max depth
         vec4 tile;
@@ -200,24 +196,22 @@ const material = new THREE.RawShaderMaterial({
         if (mip == 5) tile = textureGather(mipmaps[5], uv, 0);
         float depth = max(max(tile.x, tile.y), max(tile.z, tile.w));
 
-        console = ndc.z;
-
         // Test against conservative depth
-        if (abs(depth - ndc.z) > 0.01 && depth > ndc.z) visible = false;
+        if (abs(ndc.z - depth) < 0.01 && depth > ndc.z) visible = false;
       }
 
       // Write visibility
-      // visibility = visible ? 0 : 2;
+      visibility = visible ? 0 : 2;
     }
   `,
   vertexShader: /* glsl */ `//#version 300 es
     out vec2 vUv;
-    // in int visibility;
+    in int visibility;
     in float console;
 
     void main() {
       vUv = vec2(gl_VertexID << 1 & 2, gl_VertexID & 2);
-      gl_Position = vec4(vUv * 2.0 - 1.0, 0, 1);
+      gl_Position = vec4(vUv * 2.0 - 1.0, visibility, 1);
     }
   `,
   fragmentShader: /* glsl */ `//#version 300 es
@@ -291,7 +285,7 @@ plane.position.z = 1
 plane.scale.setScalar(2)
 plane.material.transparent = true
 plane.material.opacity = 0.2
-// scene.add(plane)
+scene.add(plane)
 
 const renderTarget = new THREE.WebGLRenderTarget()
 renderTarget.depthBuffer = true
@@ -343,7 +337,8 @@ renderer.setAnimationLoop(() => {
   // blitMaterial.uniforms.tDepth.value = renderTarget.depthTexture
 
   renderer.setRenderTarget(null)
-  renderer.render(blitMesh, camera)
+  // renderer.render(blitMesh, camera)
+  renderer.render(scene, camera)
 
   renderer.compute(mesh)
   // renderer.render(mesh, camera)

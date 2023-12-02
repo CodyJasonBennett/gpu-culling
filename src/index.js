@@ -233,8 +233,6 @@ const mesh = new THREE.Mesh(geometry, material)
 const blitMaterial = new THREE.ShaderMaterial({
   uniforms: {
     tDepth: new THREE.Uniform(null),
-    cameraNear: new THREE.Uniform(camera.near),
-    cameraFar: new THREE.Uniform(camera.far),
   },
   vertexShader: /* glsl */ `
     out vec2 vUv;
@@ -246,11 +244,7 @@ const blitMaterial = new THREE.ShaderMaterial({
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDepth;
-    uniform float cameraNear;
-    uniform float cameraFar;
     in vec2 vUv;
-
-    #include <packing>
 
     vec4 textureGather(sampler2D tex, vec2 uv, int comp) {
       vec2 res = vec2(textureSize(tex, 0));
@@ -265,11 +259,8 @@ const blitMaterial = new THREE.ShaderMaterial({
 
     void main() {
       vec4 tile = textureGather(tDepth, vUv, 0);
-      gl_FragDepth = max(max(tile.x, tile.y), max(tile.z, tile.w));
-
-      float viewZ = perspectiveDepthToViewZ(gl_FragDepth, cameraNear, cameraFar);
-      float depth = viewZToOrthographicDepth(viewZ, cameraNear, cameraFar);
-      gl_FragColor = vec4(vec3(1.0 - depth), 1);
+      float depth = max(max(tile.x, tile.y), max(tile.z, tile.w));
+      gl_FragColor = vec4(depth, 0, 0, 1);
     }
   `,
 })
@@ -287,37 +278,43 @@ plane.material.transparent = true
 plane.material.opacity = 0.2
 scene.add(plane)
 
-const renderTarget = new THREE.WebGLRenderTarget()
-renderTarget.depthBuffer = true
-renderTarget.depthTexture = new THREE.DepthTexture()
-
 const onResize = () => {
   material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight)
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderTarget.setSize(window.innerWidth, window.innerHeight)
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
 }
 onResize()
 window.addEventListener('resize', onResize)
 
-let width = window.innerWidth
-let height = window.innerHeight
-const numLevels = Math.min(6, 1 + Math.floor(Math.log2(Math.max(width, height))))
+let width = window.innerWidth * 2
+let height = window.innerHeight * 2
 
-const mipmaps = [renderTarget]
-for (let i = 1; i < numLevels; i++) {
+const mipmaps = []
+for (let i = 0; i < 6; i++) {
   width = Math.max(1, Math.floor(width * 0.5))
   height = Math.max(1, Math.floor(height * 0.5))
 
   const mipmap = new THREE.WebGLRenderTarget(width, height)
-  mipmap.depthBuffer = true
-  mipmap.depthTexture = new THREE.DepthTexture()
-
+  mipmap.texture.minFilter = mipmap.texture.magFilter = THREE.NearestFilter
+  mipmap.texture.type = THREE.HalfFloatType
   mipmaps[i] = mipmap
 }
 
-material.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.depthTexture)
+material.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.texture)
+
+const depthMaterial = new THREE.ShaderMaterial({
+  vertexShader: /* glsl */ `
+    void main() {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    void main() {
+      gl_FragColor = vec4(gl_FragCoord.z, 0, 0, 1);
+    }
+  `,
+})
 
 renderer.setAnimationLoop(() => {
   controls.update()
@@ -325,21 +322,18 @@ renderer.setAnimationLoop(() => {
   camera.updateWorldMatrix()
   projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).transpose()
 
-  renderer.setRenderTarget(renderTarget)
+  scene.overrideMaterial = depthMaterial
+  renderer.setRenderTarget(mipmaps[0])
   renderer.render(scene, camera)
+  scene.overrideMaterial = null
 
-  for (let i = 1; i < numLevels; i++) {
-    blitMaterial.uniforms.tDepth.value = mipmaps[i - 1].depthTexture
+  for (let i = 1; i < 6; i++) {
+    blitMaterial.uniforms.tDepth.value = mipmaps[i - 1].texture
     renderer.setRenderTarget(mipmaps[i])
     renderer.render(blitMesh, camera)
   }
 
-  // blitMaterial.uniforms.tDepth.value = renderTarget.depthTexture
-
   renderer.setRenderTarget(null)
-  // renderer.render(blitMesh, camera)
-  renderer.render(scene, camera)
-
   renderer.compute(mesh)
-  // renderer.render(mesh, camera)
+  renderer.render(scene, camera)
 })

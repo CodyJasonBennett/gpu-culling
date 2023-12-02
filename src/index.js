@@ -278,28 +278,28 @@ plane.material.transparent = true
 plane.material.opacity = 0.2
 scene.add(plane)
 
+const renderTarget = new THREE.WebGLRenderTarget()
+renderTarget.texture.minFilter = renderTarget.texture.magFilter = THREE.NearestFilter
+renderTarget.texture.type = THREE.HalfFloatType
+
+const mipmaps = Array.from({ length: 6 }, () => renderTarget.clone())
+
 const onResize = () => {
-  material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight)
   renderer.setSize(window.innerWidth, window.innerHeight)
+  renderer.getDrawingBufferSize(material.uniforms.resolution.value)
+
+  for (let i = 0; i < 6; i++) {
+    mipmaps[i].setSize(
+      Math.max(1, Math.floor(window.innerWidth * Math.pow(0.5, i))),
+      Math.max(1, Math.floor(window.innerHeight * Math.pow(0.5, i))),
+    )
+  }
+
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
 }
 onResize()
 window.addEventListener('resize', onResize)
-
-let width = window.innerWidth * 2
-let height = window.innerHeight * 2
-
-const mipmaps = []
-for (let i = 0; i < 6; i++) {
-  width = Math.max(1, Math.floor(width * 0.5))
-  height = Math.max(1, Math.floor(height * 0.5))
-
-  const mipmap = new THREE.WebGLRenderTarget(width, height)
-  mipmap.texture.minFilter = mipmap.texture.magFilter = THREE.NearestFilter
-  mipmap.texture.type = THREE.HalfFloatType
-  mipmaps[i] = mipmap
-}
 
 material.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.texture)
 

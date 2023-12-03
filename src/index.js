@@ -39,12 +39,6 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   const compiled = materialProperties.currentProgram
   const program = compiled.program
 
-  // TODO: better cleanup to prevent state leak
-  gl.bindVertexArray(null)
-  gl.bindBuffer(gl.ARRAY_BUFFER, null)
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null)
-  gl.bindBuffer(gl.UNIFORM_BUFFER, null)
-
   _transformFeedback ??= gl.createTransformFeedback()
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, _transformFeedback)
 
@@ -93,7 +87,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   //   gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
   //   gl.bindBuffer(gl.ARRAY_BUFFER, null)
 
-  //   console.log(output, Array.from(attribute.array).slice(0, attribute.itemSize))
+  //   console.log(output, ...Array.from(attribute.array))
   // }
 }
 
@@ -111,13 +105,15 @@ controls.enableDamping = true
 
 const scene = new THREE.Scene()
 
-const visibility = new THREE.InstancedBufferAttribute(new Int32Array(3), 1)
-visibility.gpuType = THREE.IntType
-
 const geometry = new THREE.BufferGeometry()
 geometry.setDrawRange(0, 3)
 geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
-geometry.setAttribute('visibility', visibility)
+geometry.attributes = {
+  radius: new THREE.BufferAttribute(new Float32Array(3), 1),
+  position: new THREE.BufferAttribute(new Float32Array(9), 3),
+  visibility: new THREE.InstancedBufferAttribute(new Int32Array(3), 1),
+}
+geometry.attributes.visibility.gpuType = THREE.IntType
 
 const projectionViewMatrix = new THREE.Matrix4()
 
@@ -126,16 +122,14 @@ const cullMaterial = new THREE.RawShaderMaterial({
     projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
     resolution: new THREE.Uniform(new THREE.Vector2()),
     mipmaps: new THREE.Uniform(null),
-    radius: new THREE.Uniform(),
   },
   computeShader: /* glsl */ `//#version 300 es
     uniform mat4 projectionViewMatrix;
     uniform vec2 resolution;
     uniform sampler2D[6] mipmaps;
 
-    uniform float radius;
-    const vec3 position = vec3(0, 0, 0);
-
+    in float radius;
+    in vec3 position;
     flat out int visibility;
 
     vec4 textureGather(sampler2D tex, vec2 uv, int comp) {
@@ -229,11 +223,11 @@ const normalMaterial = new THREE.ShaderMaterial({
 })
 
 const meshGeometry = new THREE.BoxGeometry()
-meshGeometry.setAttribute('visibility', visibility)
+meshGeometry.setAttribute('visibility', geometry.attributes.visibility)
 meshGeometry.computeBoundingSphere()
-cullMaterial.uniforms.radius.value = meshGeometry.boundingSphere.radius
 
 const cube = new THREE.InstancedMesh(meshGeometry, normalMaterial, 1)
+geometry.attributes.radius.array[0] = meshGeometry.boundingSphere.radius
 scene.add(cube)
 
 const plane = new THREE.Mesh(meshGeometry, new THREE.MeshNormalMaterial())

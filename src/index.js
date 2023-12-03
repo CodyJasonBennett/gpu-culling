@@ -85,16 +85,16 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   node.material = oldMaterial
 
   // Debug CPU readback
-  for (const output of compiled.outputs) {
-    const attribute = node.geometry.attributes[output]
-    const { buffer } = this.attributes.get(attribute)
+  // for (const output of compiled.outputs) {
+  //   const attribute = node.geometry.attributes[output]
+  //   const { buffer } = this.attributes.get(attribute)
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
-    gl.bindBuffer(gl.ARRAY_BUFFER, null)
+  //   gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+  //   gl.getBufferSubData(gl.ARRAY_BUFFER, 0, attribute.array)
+  //   gl.bindBuffer(gl.ARRAY_BUFFER, null)
 
-    console.log('cube culled', Array.from(attribute.array)[0] === 2)
-  }
+  //   console.log(output, Array.from(attribute.array).slice(0, attribute.itemSize))
+  // }
 }
 
 THREE.ShaderMaterial.prototype.computeShader = ''
@@ -105,19 +105,19 @@ document.body.appendChild(renderer.domElement)
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight)
 camera.position.z = 5
-// camera.position.x = 4
-// camera.lookAt(0, 0, 0)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
 
 const scene = new THREE.Scene()
 
+const visibility = new THREE.InstancedBufferAttribute(new Int32Array(3), 1)
+visibility.gpuType = THREE.IntType
+
 const geometry = new THREE.BufferGeometry()
 geometry.setDrawRange(0, 3)
 geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
-geometry.setAttribute('visibility', new THREE.BufferAttribute(new Int32Array(3), 1))
-geometry.attributes.visibility.gpuType = THREE.IntType
+geometry.setAttribute('visibility', visibility)
 
 const projectionViewMatrix = new THREE.Matrix4()
 
@@ -228,7 +228,39 @@ const material = new THREE.RawShaderMaterial({
   glslVersion: THREE.GLSL3,
 })
 const mesh = new THREE.Mesh(geometry, material)
-// scene.add(mesh)
+
+const normalMaterial = new THREE.ShaderMaterial({
+  vertexShader: /* glsl */ `
+    in int visibility;
+    out vec3 vNormal;
+
+    void main() {
+      vNormal = normalMatrix * normal;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1);
+      gl_Position.z += float(visibility);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    in vec3 vNormal;
+
+    void main() {
+      gl_FragColor = vec4(normalize(vNormal) * 0.5 + 0.5, 1);
+    }
+  `,
+})
+
+const cube = new THREE.InstancedMesh(new THREE.BoxGeometry(), normalMaterial, 1)
+cube.geometry.setAttribute('visibility', visibility)
+cube.geometry.computeBoundingSphere()
+material.uniforms.radius.value = cube.geometry.boundingSphere.radius
+scene.add(cube)
+
+const plane = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshNormalMaterial())
+plane.position.z = 1
+plane.scale.setScalar(2)
+plane.material.transparent = true
+plane.material.opacity = 0.2
+scene.add(plane)
 
 const blitMaterial = new THREE.ShaderMaterial({
   uniforms: {
@@ -265,18 +297,6 @@ const blitMaterial = new THREE.ShaderMaterial({
   `,
 })
 const blitMesh = new THREE.Mesh(geometry, blitMaterial)
-
-const cube = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshNormalMaterial())
-cube.geometry.computeBoundingSphere()
-material.uniforms.radius.value = cube.geometry.boundingSphere.radius
-scene.add(cube)
-
-const plane = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshNormalMaterial())
-plane.position.z = 1
-plane.scale.setScalar(2)
-plane.material.transparent = true
-plane.material.opacity = 0.2
-scene.add(plane)
 
 const renderTarget = new THREE.WebGLRenderTarget()
 renderTarget.texture.minFilter = renderTarget.texture.magFilter = THREE.NearestFilter

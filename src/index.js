@@ -121,23 +121,22 @@ geometry.setAttribute('visibility', visibility)
 
 const projectionViewMatrix = new THREE.Matrix4()
 
-const material = new THREE.RawShaderMaterial({
+const cullMaterial = new THREE.RawShaderMaterial({
   uniforms: {
-    resolution: new THREE.Uniform(new THREE.Vector2()),
     projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
+    resolution: new THREE.Uniform(new THREE.Vector2()),
     mipmaps: new THREE.Uniform(null),
     radius: new THREE.Uniform(),
   },
   computeShader: /* glsl */ `//#version 300 es
-    uniform vec2 resolution;
     uniform mat4 projectionViewMatrix;
+    uniform vec2 resolution;
     uniform sampler2D[6] mipmaps;
+
     uniform float radius;
+    const vec3 position = vec3(0, 0, 0);
 
     flat out int visibility;
-
-    // const float radius = 0.87;
-    const vec4 position = vec4(0, 0, 0, 1);
 
     vec4 textureGather(sampler2D tex, vec2 uv, int comp) {
       vec2 res = vec2(textureSize(tex, 0));
@@ -156,18 +155,19 @@ const material = new THREE.RawShaderMaterial({
       // Frustum cull
       if (visible) {
         // http://cs.otago.ac.nz/postgrads/alexis/planeExtraction.pdf
+        mat4 frustum = transpose(projectionViewMatrix);
         vec4 planes[] = vec4[](
-          projectionViewMatrix[3] - projectionViewMatrix[0], // left   (-w < +x)
-          projectionViewMatrix[3] + projectionViewMatrix[0], // right  (+x < +w)
-          projectionViewMatrix[3] - projectionViewMatrix[1], // bottom (-w < +y)
-          projectionViewMatrix[3] + projectionViewMatrix[1], // top    (+y < +w)
-          projectionViewMatrix[3] - projectionViewMatrix[2], // near   (-w < +z)
-          projectionViewMatrix[3] + projectionViewMatrix[2]  // far    (+z < +w)
+          frustum[3] - frustum[0], // left   (-w < +x)
+          frustum[3] + frustum[0], // right  (+x < +w)
+          frustum[3] - frustum[1], // bottom (-w < +y)
+          frustum[3] + frustum[1], // top    (+y < +w)
+          frustum[3] - frustum[2], // near   (-w < +z)
+          frustum[3] + frustum[2]  // far    (+z < +w)
         );
 
         for (int i = 0; i < 6; i++) {
-          float distance = dot(planes[i], position);
-          if (distance <= -radius) {
+          float distance = dot(planes[i], vec4(position, 1));
+          if (distance < -radius) {
             visible = false;
             break;
           }
@@ -177,7 +177,7 @@ const material = new THREE.RawShaderMaterial({
       // Occlusion cull
       if (visible) {
         // Calculate NDC from projected position
-        vec4 ndc = transpose(projectionViewMatrix) * vec4(position.xy, position.z - radius, 1);
+        vec4 ndc = projectionViewMatrix * vec4(position.xy, position.z - radius, 1);
         ndc.xyz /= ndc.w;
 
         // Calculate screen-space UVs
@@ -204,30 +204,9 @@ const material = new THREE.RawShaderMaterial({
       visibility = visible ? 0 : 2;
     }
   `,
-  vertexShader: /* glsl */ `//#version 300 es
-    out vec2 vUv;
-    in int visibility;
-    in float console;
-
-    void main() {
-      vUv = vec2(gl_VertexID << 1 & 2, gl_VertexID & 2);
-      gl_Position = vec4(vUv * 2.0 - 1.0, visibility, 1);
-    }
-  `,
-  fragmentShader: /* glsl */ `//#version 300 es
-    precision lowp float;
-
-    in vec2 vUv;
-    out vec4 color;
-
-    void main() {
-      color = vec4(vUv, 0, 0.5);
-    }
-  `,
-  transparent: true,
   glslVersion: THREE.GLSL3,
 })
-const mesh = new THREE.Mesh(geometry, material)
+const cullMesh = new THREE.Mesh(geometry, cullMaterial)
 
 const normalMaterial = new THREE.ShaderMaterial({
   vertexShader: /* glsl */ `
@@ -249,20 +228,22 @@ const normalMaterial = new THREE.ShaderMaterial({
   `,
 })
 
-const cube = new THREE.InstancedMesh(new THREE.BoxGeometry(), normalMaterial, 1)
-cube.geometry.setAttribute('visibility', visibility)
-cube.geometry.computeBoundingSphere()
-material.uniforms.radius.value = cube.geometry.boundingSphere.radius
+const meshGeometry = new THREE.BoxGeometry()
+meshGeometry.setAttribute('visibility', visibility)
+meshGeometry.computeBoundingSphere()
+cullMaterial.uniforms.radius.value = meshGeometry.boundingSphere.radius
+
+const cube = new THREE.InstancedMesh(meshGeometry, normalMaterial, 1)
 scene.add(cube)
 
-const plane = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshNormalMaterial())
+const plane = new THREE.Mesh(meshGeometry, new THREE.MeshNormalMaterial())
 plane.position.z = 1
-plane.scale.setScalar(2)
+plane.scale.set(2, 2, 0.001)
 plane.material.transparent = true
 plane.material.opacity = 0.2
 scene.add(plane)
 
-const blitMaterial = new THREE.ShaderMaterial({
+const downsampleMaterial = new THREE.ShaderMaterial({
   uniforms: {
     tDepth: new THREE.Uniform(null),
   },
@@ -296,18 +277,22 @@ const blitMaterial = new THREE.ShaderMaterial({
     }
   `,
 })
-const blitMesh = new THREE.Mesh(geometry, blitMaterial)
+const downsamplePass = new THREE.Mesh(geometry, downsampleMaterial)
 
-const renderTarget = new THREE.WebGLRenderTarget()
-renderTarget.texture.minFilter = renderTarget.texture.magFilter = THREE.NearestFilter
-renderTarget.texture.type = THREE.HalfFloatType
-renderTarget.texture.format = THREE.RedFormat
-
-const mipmaps = Array.from({ length: 6 }, () => renderTarget.clone())
+const mipmaps = Array.from(
+  { length: 6 },
+  () =>
+    new THREE.WebGLRenderTarget(0, 0, {
+      minFilter: THREE.NearestFilter,
+      type: THREE.HalfFloatType,
+      format: THREE.RedFormat,
+    }),
+)
+cullMaterial.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.texture)
 
 const onResize = () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.getDrawingBufferSize(material.uniforms.resolution.value)
+  renderer.getDrawingBufferSize(cullMaterial.uniforms.resolution.value)
 
   for (let i = 0; i < 6; i++) {
     mipmaps[i].setSize(
@@ -321,8 +306,6 @@ const onResize = () => {
 }
 onResize()
 window.addEventListener('resize', onResize)
-
-material.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.texture)
 
 const depthMaterial = new THREE.ShaderMaterial({
   vertexShader: /* glsl */ `
@@ -340,21 +323,25 @@ const depthMaterial = new THREE.ShaderMaterial({
 renderer.setAnimationLoop(() => {
   controls.update()
 
-  camera.updateWorldMatrix()
-  projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).transpose()
-
+  // Gather initial depth
   scene.overrideMaterial = depthMaterial
   renderer.setRenderTarget(mipmaps[0])
   renderer.render(scene, camera)
   scene.overrideMaterial = null
 
+  // Create Hi-Z mip-chain
   for (let i = 1; i < 6; i++) {
-    blitMaterial.uniforms.tDepth.value = mipmaps[i - 1].texture
+    downsampleMaterial.uniforms.tDepth.value = mipmaps[i - 1].texture
     renderer.setRenderTarget(mipmaps[i])
-    renderer.render(blitMesh, camera)
+    renderer.render(downsamplePass, camera)
   }
-
   renderer.setRenderTarget(null)
-  renderer.compute(mesh)
+
+  // Perform occlusion culling
+  camera.updateWorldMatrix()
+  projectionViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  renderer.compute(cullMesh)
+
+  // Render with culling
   renderer.render(scene, camera)
 })

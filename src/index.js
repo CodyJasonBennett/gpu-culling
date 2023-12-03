@@ -99,7 +99,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
 
 THREE.ShaderMaterial.prototype.computeShader = ''
 
-const renderer = new THREE.WebGLRenderer()
+const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 
@@ -301,6 +301,7 @@ const blitMesh = new THREE.Mesh(geometry, blitMaterial)
 const renderTarget = new THREE.WebGLRenderTarget()
 renderTarget.texture.minFilter = renderTarget.texture.magFilter = THREE.NearestFilter
 renderTarget.texture.type = THREE.HalfFloatType
+renderTarget.texture.format = THREE.RedFormat
 
 const mipmaps = Array.from({ length: 6 }, () => renderTarget.clone())
 

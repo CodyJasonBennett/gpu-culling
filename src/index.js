@@ -195,7 +195,7 @@ const cullMaterial = new THREE.RawShaderMaterial({
       }
 
       // Write visibility
-      visibility = visible ? 0 : 2;
+      visibility = visible ? 1 : 0;
     }
   `,
   glslVersion: THREE.GLSL3,
@@ -209,8 +209,7 @@ const normalMaterial = new THREE.ShaderMaterial({
 
     void main() {
       vNormal = normalMatrix * normal;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1);
-      gl_Position.z += float(visibility);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1 / visibility);
     }
   `,
   fragmentShader: /* glsl */ `

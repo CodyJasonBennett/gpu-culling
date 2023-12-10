@@ -10,14 +10,17 @@ let _transformFeedback = null
 const _compiled = new WeakMap()
 const _camera = new THREE.Camera()
 
+const DEFAULT_FRAGMENT = new THREE.ShaderMaterial().fragmentShader // default_fragment
+
 /**
  *
  * @param {THREE.Mesh} node
  */
 THREE.WebGLRenderer.prototype.compute = function (node) {
+  const skipRaster = node.material.fragmentShader === DEFAULT_FRAGMENT
+
   /** @type {WebGL2RenderingContext} */
   const gl = this.getContext()
-  gl.enable(gl.RASTERIZER_DISCARD)
 
   // Create memoized compute material
   let oldMaterial = node.material
@@ -25,7 +28,7 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
   if (!material) {
     material = node.material.clone()
     material.vertexShader = node.material.computeShader
-    material.fragmentShader = 'out lowp vec4 c;void main(){c=vec4(0);}'
+    if (skipRaster) material.fragmentShader = 'out lowp vec4 c;void main(){c=vec4(0);}'
     material.uniforms = node.material.uniforms
     _compiled.set(node.material, material)
   }
@@ -70,12 +73,14 @@ THREE.WebGLRenderer.prototype.compute = function (node) {
     }
   }
 
+  if (!skipRaster) gl.enable(gl.RASTERIZER_DISCARD)
+
   gl.beginTransformFeedback(gl.TRIANGLES)
   this.render(node, _camera)
   gl.endTransformFeedback()
 
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null)
-  gl.disable(gl.RASTERIZER_DISCARD)
+  if (!skipRaster) gl.disable(gl.RASTERIZER_DISCARD)
   node.material = oldMaterial
 
   // Debug CPU readback

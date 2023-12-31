@@ -214,7 +214,7 @@ const normalMaterial = new THREE.ShaderMaterial({
 
     void main() {
       vNormal = normalMatrix * normal;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1 / visibility);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, visibility);
     }
   `,
   fragmentShader: /* glsl */ `

@@ -116,13 +116,17 @@ geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
 geometry.attributes = {
   radius: new THREE.BufferAttribute(new Float32Array(3), 1),
   position: new THREE.BufferAttribute(new Float32Array(9), 3),
-  visibility: new THREE.InstancedBufferAttribute(new Int32Array(3), 1),
+  // TODO: only highp supported, use uint8
+  visibility: new THREE.InstancedBufferAttribute(new Uint32Array(3), 1),
 }
 geometry.attributes.visibility.gpuType = THREE.IntType
 
 const projectionViewMatrix = new THREE.Matrix4()
 
 const cullMaterial = new THREE.RawShaderMaterial({
+  defines: {
+    NUM_MIPS: 0,
+  },
   uniforms: {
     projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
     resolution: new THREE.Uniform(new THREE.Vector2()),
@@ -131,11 +135,11 @@ const cullMaterial = new THREE.RawShaderMaterial({
   computeShader: /* glsl */ `//#version 300 es
     uniform mat4 projectionViewMatrix;
     uniform vec2 resolution;
-    uniform sampler2D[6] mipmaps;
+    uniform sampler2D[NUM_MIPS] mipmaps;
 
     in float radius;
     in vec3 position;
-    flat out int visibility;
+    flat out uint visibility;
 
     vec4 textureGather(sampler2D tex, vec2 uv, int comp) {
       vec2 res = vec2(textureSize(tex, 0));
@@ -146,6 +150,15 @@ const cullMaterial = new THREE.RawShaderMaterial({
         texelFetchOffset(tex, p, 0, ivec2(1, 0))[comp],
         texelFetchOffset(tex, p, 0, ivec2(0, 0))[comp]
       );
+    }
+    vec4 textureGatherLevel(sampler2D[NUM_MIPS] tex, vec2 uv, int level, int comp) {
+      // TODO: implement RT mips and TEXTURE_BASE_LEVEL for Hi-Z feedback
+      if (level < 1) return textureGather(tex[0], uv, comp);
+      if (level == 1) return textureGather(tex[1], uv, comp);
+      if (level == 2) return textureGather(tex[2], uv, comp);
+      if (level == 3) return textureGather(tex[3], uv, comp);
+      if (level == 4) return textureGather(tex[4], uv, comp);
+      return textureGather(tex[5], uv, comp);
     }
 
     void main() {
@@ -175,32 +188,22 @@ const cullMaterial = new THREE.RawShaderMaterial({
 
       // Occlusion cull
       if (visible) {
-        // Calculate NDC from projected position
+        // Calculate sphere NDC from projected position
         vec4 ndc = projectionViewMatrix * vec4(position.xy, position.z - radius, 1);
         ndc.xyz /= ndc.w;
 
-        // Calculate screen-space UVs
+        // Sample screen depth
         vec2 uv = (ndc.xy + 1.0) * 0.5;
-
-        // Calculate Hi-Z mip
-        int mip = clamp(int(ceil(log2(radius * resolution))), 0, 5);
-
-        // Calculate max depth
-        vec4 tile;
-        if (mip == 0) tile = textureGather(mipmaps[0], uv, 0);
-        if (mip == 1) tile = textureGather(mipmaps[1], uv, 0);
-        if (mip == 2) tile = textureGather(mipmaps[2], uv, 0);
-        if (mip == 3) tile = textureGather(mipmaps[3], uv, 0);
-        if (mip == 4) tile = textureGather(mipmaps[4], uv, 0);
-        if (mip == 5) tile = textureGather(mipmaps[5], uv, 0);
+        int mip = int(ceil(log2(radius * resolution)));
+        vec4 tile = textureGatherLevel(mipmaps, uv, mip, 0);
         float depth = max(max(tile.x, tile.y), max(tile.z, tile.w));
 
-        // Test against conservative depth
-        if (abs(ndc.z - depth) < 0.01 && depth > ndc.z) visible = false;
+        // Test NDC against screen depth
+        if (depth < ndc.z + 0.01) visible = false;
       }
 
       // Write visibility
-      visibility = visible ? 1 : 0;
+      visibility = visible ? 1u : 0u;
     }
   `,
   glslVersion: THREE.GLSL3,
@@ -209,7 +212,7 @@ const cullMesh = new THREE.Mesh(geometry, cullMaterial)
 
 const normalMaterial = new THREE.ShaderMaterial({
   vertexShader: /* glsl */ `
-    in int visibility;
+    in uint visibility;
     out vec3 vNormal;
 
     void main() {
@@ -277,27 +280,38 @@ const downsampleMaterial = new THREE.ShaderMaterial({
 })
 const downsamplePass = new THREE.Mesh(geometry, downsampleMaterial)
 
-const mipmaps = Array.from(
-  { length: 6 },
-  () =>
-    new THREE.WebGLRenderTarget(0, 0, {
-      minFilter: THREE.NearestFilter,
-      type: THREE.HalfFloatType,
-      format: THREE.RedFormat,
-    }),
-)
-cullMaterial.uniforms.mipmaps.value = mipmaps.map((mipmap) => mipmap.texture)
+const depthTarget = new THREE.WebGLRenderTarget(0, 0, {
+  minFilter: THREE.NearestFilter,
+  type: THREE.HalfFloatType,
+  format: THREE.RedFormat,
+})
+
+let NUM_MIPS = 0
+const mipmaps = [depthTarget]
 
 const onResize = () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.getDrawingBufferSize(cullMaterial.uniforms.resolution.value)
 
-  for (let i = 0; i < 6; i++) {
-    mipmaps[i].setSize(
-      Math.max(1, Math.floor(window.innerWidth * Math.pow(0.5, i))),
-      Math.max(1, Math.floor(window.innerHeight * Math.pow(0.5, i))),
-    )
+  NUM_MIPS = 1 + Math.floor(Math.log2(Math.max(window.innerWidth, window.innerHeight)))
+  cullMaterial.defines.NUM_MIPS = NUM_MIPS
+  // cullMaterial.computeShader = cullMaterial.computeShader.replace(
+  //   mipSelectCode,
+  //   (mipSelectCode = /* glsl */ `vec4 tile;${Array.from(
+  //     { length: NUM_MIPS },
+  //     (_, i) => `if (mip == ${i}) tile = textureGather(mipmaps[${i}], uv, 0);`,
+  //   ).join('\n')}`),
+  // )
+  cullMaterial.dispose()
+
+  cullMaterial.vertexShader.replace()
+
+  for (let i = 0; i < NUM_MIPS; i++) {
+    mipmaps[i] ??= depthTarget.clone()
+    mipmaps[i].setSize(window.innerWidth >> i, window.innerHeight >> i)
   }
+
+  cullMaterial.uniforms.mipmaps.value = mipmaps.slice(0, NUM_MIPS).map((mipmap) => mipmap.texture)
 
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
@@ -321,17 +335,20 @@ const depthMaterial = new THREE.ShaderMaterial({
 renderer.setAnimationLoop(() => {
   controls.update()
 
-  // Gather initial depth
-  scene.overrideMaterial = depthMaterial
-  renderer.setRenderTarget(mipmaps[0])
-  renderer.render(scene, camera)
-  scene.overrideMaterial = null
-
   // Create Hi-Z mip-chain
-  for (let i = 1; i < 6; i++) {
-    downsampleMaterial.uniforms.tDepth.value = mipmaps[i - 1].texture
+  for (let i = 0; i < NUM_MIPS; i++) {
     renderer.setRenderTarget(mipmaps[i])
-    renderer.render(downsamplePass, camera)
+
+    if (i === 0) {
+      // Gather initial depth
+      scene.overrideMaterial = depthMaterial
+      renderer.render(scene, camera)
+      scene.overrideMaterial = null
+    } else {
+      // Downsample previous level
+      downsampleMaterial.uniforms.tDepth.value = mipmaps[i - 1].texture
+      renderer.render(downsamplePass, camera)
+    }
   }
   renderer.setRenderTarget(null)
 

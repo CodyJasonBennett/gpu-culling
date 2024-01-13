@@ -293,7 +293,9 @@ const onResize = () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.getDrawingBufferSize(cullMaterial.uniforms.resolution.value)
 
-  NUM_MIPS = 1 + Math.floor(Math.log2(Math.max(window.innerWidth, window.innerHeight)))
+  // TODO: use POT and TEXTURE_BASE_LEVEL
+  // https://bugs.chromium.org/p/chromium/issues/detail?id=1383129
+  NUM_MIPS = 1 + Math.min(5, Math.floor(Math.log2(Math.max(window.innerWidth, window.innerHeight))))
   cullMaterial.defines.NUM_MIPS = NUM_MIPS
   // cullMaterial.computeShader = cullMaterial.computeShader.replace(
   //   mipSelectCode,
